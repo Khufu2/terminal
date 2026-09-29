@@ -4,6 +4,8 @@ export type Bar = { t: number; o: number; h: number; l: number; c: number; v: nu
 
 export type AlpacaCreds = { key: string; secret: string; paper: boolean };
 
+export type MarketTimeframe = "5Min" | "15Min" | "1Hour" | "1Day";
+
 export function getAlpacaCreds(): AlpacaCreds | null {
   const key = process.env["ALPACA_API_KEY_ID"];
   const secret = process.env["ALPACA_API_SECRET_KEY"];
@@ -29,31 +31,66 @@ const toBars = (rows: RawBar[] = []): Bar[] =>
 /** Alpaca crypto pairs use BTC/USD; the app stores BTC. */
 export const cryptoPair = (symbol: string) => (symbol.includes("/") ? symbol : `${symbol}/USD`);
 
-/** Daily bars for a batch of stock symbols. */
-export async function stockBars(c: AlpacaCreds, symbols: string[], limit = 120) {
+export async function stockBars(
+  c: AlpacaCreds,
+  symbols: string[],
+  limit = 120,
+  timeframe: MarketTimeframe = "1Day",
+) {
   if (!symbols.length) return {} as Record<string, Bar[]>;
   const url = `https://data.alpaca.markets/v2/stocks/bars?symbols=${encodeURIComponent(
     symbols.join(","),
-  )}&timeframe=1Day&limit=${limit}&adjustment=split&feed=iex&sort=asc`;
+  )}&timeframe=${timeframe}&limit=${limit}&adjustment=split&feed=iex&sort=desc`;
   const json = await get<{ bars?: Record<string, RawBar[]> }>(c, url);
   const out: Record<string, Bar[]> = {};
-  for (const [sym, rows] of Object.entries(json.bars ?? {})) out[sym] = toBars(rows);
+  for (const [sym, rows] of Object.entries(json.bars ?? {})) out[sym] = toBars(rows).reverse();
   return out;
 }
 
-/** Daily bars for a batch of crypto symbols (BTC -> BTC/USD). */
-export async function cryptoBars(c: AlpacaCreds, symbols: string[], limit = 120) {
+export async function cryptoBars(
+  c: AlpacaCreds,
+  symbols: string[],
+  limit = 120,
+  timeframe: MarketTimeframe = "1Day",
+) {
   if (!symbols.length) return {} as Record<string, Bar[]>;
   const pairs = symbols.map(cryptoPair);
   const url = `https://data.alpaca.markets/v1beta3/crypto/us/bars?symbols=${encodeURIComponent(
     pairs.join(","),
-  )}&timeframe=1Day&limit=${limit}&sort=asc`;
+  )}&timeframe=${timeframe}&limit=${limit}&sort=desc`;
   const json = await get<{ bars?: Record<string, RawBar[]> }>(c, url);
   const out: Record<string, Bar[]> = {};
   for (const [pair, rows] of Object.entries(json.bars ?? {})) {
-    out[pair.split("/")[0] ?? pair] = toBars(rows);
+    out[pair.split("/")[0] ?? pair] = toBars(rows).reverse();
   }
   return out;
+}
+
+export async function latestReferencePrice(c: AlpacaCreds, market: string, symbol: string) {
+  if (market === "crypto") {
+    const pair = cryptoPair(symbol);
+    try {
+      const url = `https://data.alpaca.markets/v1beta3/crypto/us/latest/trades?symbols=${encodeURIComponent(pair)}`;
+      const json = await get<{ trades?: Record<string, { p?: number }> }>(c, url);
+      const price = Number(json.trades?.[pair]?.p ?? 0);
+      if (price > 0) return price;
+    } catch {
+      // Fall through to latest bar.
+    }
+    const bars = await cryptoBars(c, [symbol], 2, "5Min");
+    return bars[symbol]?.at(-1)?.c ?? null;
+  }
+
+  try {
+    const url = `https://data.alpaca.markets/v2/stocks/${encodeURIComponent(symbol)}/trades/latest?feed=iex`;
+    const json = await get<{ trade?: { p?: number } }>(c, url);
+    const price = Number(json.trade?.p ?? 0);
+    if (price > 0) return price;
+  } catch {
+    // Fall through to latest bar.
+  }
+  const bars = await stockBars(c, [symbol], 2, "5Min");
+  return bars[symbol]?.at(-1)?.c ?? null;
 }
 
 export type NewsArticle = {
@@ -82,7 +119,7 @@ export type OrderRequest = {
   market: string;
 };
 
-/** Submits a real order to Alpaca (paper or live depending on the key). */
+/** Submits a broker order. Terminal's commercial baseline does not call this helper from the UI. */
 export async function submitOrder(c: AlpacaCreds, req: OrderRequest) {
   const base = c.paper ? "https://paper-api.alpaca.markets" : "https://api.alpaca.markets";
   const symbol = req.market === "crypto" ? cryptoPair(req.symbol) : req.symbol;
