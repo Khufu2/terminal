@@ -1,149 +1,64 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { toast } from "sonner";
+import { useQuery } from "@tanstack/react-query";
+import { useServerFn } from "@tanstack/react-start";
+import { CheckCircle2, CircleDashed, Database, Server, ShieldCheck } from "lucide-react";
 
 import { AppShell } from "@/components/AppShell";
-import { Panel, Pill } from "@/components/Panel";
-import { supabase } from "@/integrations/supabase/client";
-import { useConnections, useTableMutation } from "@/lib/db";
-import { cn } from "@/lib/utils";
+import { getConnectionHealth } from "@/lib/connection.functions";
 
 export const Route = createFileRoute("/_authenticated/connections")({
-  head: () => ({
-    meta: [
-      { title: "Connections — Aurum Terminal" },
-      {
-        name: "description",
-        content: "Connect brokers, exchanges, Kalshi and market data feeds to move from paper to live trading.",
-      },
-      { property: "og:title", content: "Connections — Aurum Terminal" },
-      { property: "og:description", content: "Step-by-step setup for Alpaca, Binance, Kalshi and market data." },
-    ],
-  }),
+  head: () => ({ meta: [{ title: "Connections — Terminal" }] }),
   component: Connections,
 });
 
-const GUIDES: Record<string, { what: string; steps: string[] }> = {
-  alpaca: {
-    what: "US stocks & ETFs execution, paper and live.",
-    steps: [
-      "Create an account at alpaca.markets and open the Paper Trading dashboard.",
-      "Generate an API key + secret (start with paper keys).",
-      "Send me the keys here and I'll store them as encrypted backend secrets.",
-      "I wire order routing so the trade ticket can flip from Sim to Live.",
-    ],
-  },
-  binance: {
-    what: "Crypto spot execution and price feeds.",
-    steps: [
-      "In Binance, go to API Management and create a key labelled Aurum.",
-      "Enable Spot Trading only — leave withdrawals disabled.",
-      "Whitelist server IPs if your account requires it, then share the key + secret.",
-      "I add them as secrets and route crypto orders through Binance.",
-    ],
-  },
-  kalshi: {
-    what: "Regulated event contracts (elections, macro, weather).",
-    steps: [
-      "Sign up at kalshi.com and complete identity verification.",
-      "Create an API key in Account → API, and download the RSA private key file.",
-      "Share the key ID and private key with me; they go straight into secrets.",
-      "Kalshi markets then appear with live prices and order placement.",
-    ],
-  },
-  polygon: {
-    what: "Real-time and historical market data for stocks and crypto.",
-    steps: [
-      "Create a polygon.io account and pick a plan (the free tier works to start).",
-      "Copy your API key from the dashboard.",
-      "Share it and I'll replace the synthetic candles with real OHLC data.",
-    ],
-  },
-  orchestrator: {
-    what: "Your existing Python trading-orchestrator bot.",
-    steps: [
-      "Deploy the orchestrator anywhere it can reach the internet.",
-      "I expose a signed webhook endpoint on this app.",
-      "Point the orchestrator at that URL so its signals land in the Signals page automatically.",
-    ],
-  },
-};
-
-const STATUSES = ["not_connected", "pending", "connected"] as const;
-
 function Connections() {
-  const connections = useConnections();
-
-  const setStatus = useTableMutation<{ id: string; status: string }>(
-    "connections",
-    ({ id, status }) => supabase.from("connections").update({ status }).eq("id", id),
-    ["connections"],
-  );
+  const healthFn = useServerFn(getConnectionHealth);
+  const health = useQuery({ queryKey: ["connection-health"], queryFn: () => healthFn({ data: undefined }), refetchInterval: 30_000 });
 
   return (
-    <AppShell title="Connections" subtitle="Everything you need to go from paper to live">
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-12">
-        <Panel className="lg:col-span-12" title="How this works">
-          <p className="text-xs leading-relaxed text-muted-foreground">
-            The terminal runs fully in simulation today — every fill updates your real portfolio maths without touching
-            money. To trade live you connect a broker or exchange. Never paste keys into a public chat or a page you do
-            not trust; when you're ready, tell me which provider and I'll request the key through the secure secret
-            prompt so it is stored encrypted on the backend and never in the codebase.
-          </p>
-        </Panel>
+    <AppShell title="Connections" subtitle="Server-side credentials only — never paste broker keys into the browser">
+      <div className="mx-auto max-w-5xl space-y-4">
+        <section className="rounded-3xl border border-border bg-card p-5 sm:p-6">
+          <div className="flex items-start gap-3"><ShieldCheck className="mt-0.5 h-5 w-5 text-primary" /><div><h2 className="text-sm font-semibold">Credential boundary</h2><p className="mt-1 max-w-2xl text-xs leading-5 text-muted-foreground">Terminal reads provider credentials from encrypted deployment environment variables. The web client never receives the Alpaca secret or quant-engine bearer key. This commercial build stays paper-first.</p></div></div>
+        </section>
 
-        {(connections.data ?? []).map((c) => {
-          const guide = GUIDES[c.provider.toLowerCase()];
-          return (
-            <Panel key={c.id} className="lg:col-span-6">
-              <div className="flex items-start justify-between gap-2">
-                <div className="min-w-0">
-                  <h3 className="truncate text-base font-semibold capitalize">{c.provider}</h3>
-                  <p className="text-[11px] uppercase tracking-[0.14em] text-muted-foreground">{c.category}</p>
-                </div>
-                <Pill tone={c.status === "connected" ? "up" : c.status === "pending" ? "gold" : "neutral"}>
-                  {c.status.replace("_", " ")}
-                </Pill>
-              </div>
+        <div className="grid gap-4 md:grid-cols-2">
+          <ConnectionCard
+            icon={Database}
+            title="Alpaca market data"
+            status={health.data?.alpaca ? (health.data.alpacaPaper ? "Paper configured" : "Configured") : "Not configured"}
+            good={Boolean(health.data?.alpaca)}
+            description="Verified US equity and crypto daily bars for Explore and Trade. Paper broker credentials are recommended."
+            env={["ALPACA_API_KEY_ID", "ALPACA_API_SECRET_KEY", "ALPACA_PAPER=true"]}
+          />
+          <ConnectionCard
+            icon={Server}
+            title="Terminal Quant Engine"
+            status={health.data?.quantOnline ? "Online" : health.data?.quantConfigured ? "Configured, unreachable" : "Not configured"}
+            good={Boolean(health.data?.quantOnline)}
+            description="Isolated Vibe-Trading service for research, backtests, factors and run artifacts."
+            env={["QUANT_ENGINE_URL", "QUANT_ENGINE_API_KEY"]}
+          />
+        </div>
 
-              <p className="mt-2 text-xs text-muted-foreground">{guide?.what ?? c.notes}</p>
-
-              {guide && (
-                <ol className="mt-3 space-y-1.5">
-                  {guide.steps.map((s, i) => (
-                    <li key={s} className="flex gap-2 text-xs text-muted-foreground">
-                      <span className="num text-gold-soft">{i + 1}.</span>
-                      <span>{s}</span>
-                    </li>
-                  ))}
-                </ol>
-              )}
-
-              <div className="mt-3 flex gap-1">
-                {STATUSES.map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onClick={() =>
-                      setStatus.mutate(
-                        { id: c.id, status: s },
-                        { onError: (e) => toast.error(e.message) },
-                      )
-                    }
-                    className={cn(
-                      "flex-1 rounded border py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors",
-                      c.status === s
-                        ? "border-gold/50 bg-gold/10 text-gold-soft"
-                        : "border-border text-muted-foreground hover:text-foreground",
-                    )}
-                  >
-                    {s.replace("_", " ")}
-                  </button>
-                ))}
-              </div>
-            </Panel>
-          );
-        })}
+        <section className="rounded-3xl border border-border bg-card p-5 sm:p-6">
+          <h2 className="text-sm font-semibold">Quant engine deployment</h2>
+          <ol className="mt-4 space-y-3 text-xs leading-5 text-muted-foreground">
+            <li><span className="mr-2 font-mono text-primary">01</span>Deploy <code className="rounded bg-background px-1.5 py-0.5">services/quant-engine</code> as a Docker service with persistent storage mounted at <code className="rounded bg-background px-1.5 py-0.5">/data</code>.</li>
+            <li><span className="mr-2 font-mono text-primary">02</span>Set a long random <code className="rounded bg-background px-1.5 py-0.5">API_AUTH_KEY</code>, plus the engine's LLM provider credentials.</li>
+            <li><span className="mr-2 font-mono text-primary">03</span>Set the web app's <code className="rounded bg-background px-1.5 py-0.5">QUANT_ENGINE_URL</code> and matching <code className="rounded bg-background px-1.5 py-0.5">QUANT_ENGINE_API_KEY</code>.</li>
+          </ol>
+        </section>
       </div>
     </AppShell>
   );
+}
+
+function ConnectionCard({ icon: Icon, title, status, good, description, env }: { icon: typeof Database; title: string; status: string; good: boolean; description: string; env: string[] }) {
+  return <section className="rounded-3xl border border-border bg-card p-5">
+    <div className="flex items-start justify-between gap-3"><div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-white/[0.04]"><Icon className="h-4 w-4 text-primary" /></div><span className={good ? "flex items-center gap-1.5 rounded-full bg-primary/10 px-2.5 py-1 text-[10px] font-semibold text-primary" : "flex items-center gap-1.5 rounded-full bg-white/[0.04] px-2.5 py-1 text-[10px] font-semibold text-muted-foreground"}>{good ? <CheckCircle2 className="h-3 w-3" /> : <CircleDashed className="h-3 w-3" />}{status}</span></div>
+    <h3 className="mt-4 text-base font-semibold">{title}</h3>
+    <p className="mt-2 text-xs leading-5 text-muted-foreground">{description}</p>
+    <div className="mt-4 space-y-1.5">{env.map((name) => <div key={name} className="rounded-lg border border-border bg-background/50 px-3 py-2 font-mono text-[10px] text-muted-foreground">{name}</div>)}</div>
+  </section>;
 }
