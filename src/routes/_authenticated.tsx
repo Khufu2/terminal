@@ -9,9 +9,16 @@ import { ensureOnboarded } from "@/lib/onboard.functions";
 export const Route = createFileRoute("/_authenticated")({
   ssr: false,
   beforeLoad: async () => {
-    const { data, error } = await supabase.auth.getUser();
-    if (error || !data.user) throw redirect({ to: "/auth" });
-    return { user: data.user };
+    try {
+      const { data, error } = await supabase.auth.getUser();
+      if (error || !data.user) throw redirect({ to: "/auth" });
+      return { user: data.user };
+    } catch (error) {
+      // A fresh Vercel preview may not have the Supabase env copied yet.
+      // Send it to the public product preview instead of showing a generic crash.
+      if (error && typeof error === "object" && "isRedirect" in error) throw error;
+      throw redirect({ to: "/preview" });
+    }
   },
   component: AuthLayout,
 });
