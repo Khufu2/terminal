@@ -73,7 +73,7 @@ function AssetPage() {
     onError: (e) => toast.error(e instanceof Error ? e.message : "Watchlist update failed"),
   });
 
-  const price = snapshot.data?.latest ?? Number(holding?.last_price ?? 0) || null;
+  const price = snapshot.data?.latest ?? (Number(holding?.last_price ?? 0) || null);
   const marketValue = holding && price ? Number(holding.quantity) * price : 0;
   const cost = holding ? Number(holding.quantity) * Number(holding.avg_cost) : 0;
   const pnl = marketValue - cost;
