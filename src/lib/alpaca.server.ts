@@ -93,6 +93,67 @@ export async function latestReferencePrice(c: AlpacaCreds, market: string, symbo
   return bars[symbol]?.at(-1)?.c ?? null;
 }
 
+export type AlpacaAsset = {
+  id: string;
+  class: string;
+  exchange: string;
+  symbol: string;
+  name: string;
+  status: string;
+  tradable: boolean;
+  fractionable?: boolean;
+};
+
+const assetCache = new Map<string, { expires: number; rows: AlpacaAsset[] }>();
+
+export async function listAssets(c: AlpacaCreds, market: "stocks" | "crypto") {
+  const cacheKey = market;
+  const cached = assetCache.get(cacheKey);
+  if (cached && cached.expires > Date.now()) return cached.rows;
+
+  const base = c.paper ? "https://paper-api.alpaca.markets" : "https://api.alpaca.markets";
+  const assetClass = market === "crypto" ? "crypto" : "us_equity";
+  const rows = await get<AlpacaAsset[]>(
+    c,
+    `${base}/v2/assets?status=active&asset_class=${assetClass}`,
+  );
+  const clean = rows.filter((a) => a.tradable !== false);
+  assetCache.set(cacheKey, { expires: Date.now() + 5 * 60_000, rows: clean });
+  return clean;
+}
+
+export async function searchAssets(
+  c: AlpacaCreds,
+  query: string,
+  market: "stocks" | "crypto" | "all" = "all",
+  limit = 20,
+) {
+  const q = query.trim().toLowerCase();
+  if (!q) return [] as Array<{ symbol: string; name: string; market: "stocks" | "crypto"; exchange: string; fractionable: boolean }>;
+
+  const markets = market === "all" ? (["stocks", "crypto"] as const) : ([market] as const);
+  const batches = await Promise.all(markets.map(async (m) => ({ market: m, rows: await listAssets(c, m) })));
+  return batches
+    .flatMap(({ market: m, rows }) =>
+      rows
+        .filter((a) => a.symbol.toLowerCase().includes(q) || a.name.toLowerCase().includes(q))
+        .map((a) => ({
+          symbol: m === "crypto" ? a.symbol.split("/")[0] ?? a.symbol : a.symbol,
+          name: a.name,
+          market: m,
+          exchange: a.exchange,
+          fractionable: Boolean(a.fractionable || m === "crypto"),
+          score:
+            a.symbol.toLowerCase() === q ? 0 :
+            a.symbol.toLowerCase().startsWith(q) ? 1 :
+            a.name.toLowerCase().startsWith(q) ? 2 : 3,
+        })),
+    )
+    .sort((a, b) => a.score - b.score || a.symbol.localeCompare(b.symbol))
+    .slice(0, limit)
+    .map(({ score: _score, ...row }) => row);
+}
+
 export type NewsArticle = {
   id: number;
   headline: string;

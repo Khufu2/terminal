@@ -20,6 +20,10 @@ export type EngineMessage = {
   tool_trail?: Record<string, unknown>[];
 };
 
+export function isQuantEngineConfigured() {
+  return Boolean(process.env["QUANT_ENGINE_URL"] && process.env["QUANT_ENGINE_API_KEY"]);
+}
+
 function config() {
   const baseUrl = (process.env["QUANT_ENGINE_URL"] ?? "").replace(/\/$/, "");
   const apiKey = process.env["QUANT_ENGINE_API_KEY"] ?? "";
