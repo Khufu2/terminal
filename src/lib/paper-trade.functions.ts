@@ -50,19 +50,141 @@ export const placePaperTrade = createServerFn({ method: "POST" })
       p_price: price,
       p_fee_bps: 10,
     });
-    if (error) throw new Error(error.message);
+    if (!error) {
+      return result as {
+        transaction_id: string;
+        symbol: string;
+        market: string;
+        side: string;
+        quantity: number;
+        price: number;
+        notional: number;
+        fees: number;
+        cash: number;
+        position_quantity: number;
+        average_cost: number;
+      };
+    }
 
-    return result as {
-      transaction_id: string;
-      symbol: string;
-      market: string;
-      side: string;
-      quantity: number;
-      price: number;
-      notional: number;
-      fees: number;
-      cash: number;
-      position_quantity: number;
-      average_cost: number;
+    // Backward-compatible fallback for the existing Quantmaxxing database
+    // until the atomic RPC migration is applied there.
+    const rpcMissing =
+      String(error?.code ?? "") === "42883" ||
+      String(error?.message ?? "").includes("execute_paper_trade");
+    if (!rpcMissing) throw new Error(error.message);
+
+    const fees = data.quantity * price * 0.001;
+    const notional = data.quantity * price;
+
+    const { data: account, error: accountError } = await db
+      .from("accounts")
+      .select("id, balance_usd")
+      .eq("user_id", context.userId)
+      .eq("market", data.market)
+      .eq("mode", "sim")
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (accountError) throw new Error(accountError.message);
+    if (!account) throw new Error("Paper account not found.");
+
+    const { data: holding, error: holdingError } = await db
+      .from("holdings")
+      .select("id, quantity, avg_cost")
+      .eq("user_id", context.userId)
+      .eq("market", data.market)
+      .eq("symbol", data.symbol)
+      .order("created_at", { ascending: true })
+      .limit(1)
+      .maybeSingle();
+    if (holdingError) throw new Error(holdingError.message);
+
+    const cash = Number(account.balance_usd);
+    const oldQty = Number(holding?.quantity ?? 0);
+    const oldAvg = Number(holding?.avg_cost ?? 0);
+
+    if (data.side === "buy" && cash < notional + fees) {
+      throw new Error("Insufficient paper buying power.");
+    }
+    if (data.side === "sell" && oldQty < data.quantity) {
+      throw new Error("Insufficient paper position.");
+    }
+
+    let newQty = oldQty;
+    let newAvg = oldAvg;
+    let newCash = cash;
+
+    if (data.side === "buy") {
+      newQty = oldQty + data.quantity;
+      newAvg = newQty > 0 ? (oldQty * oldAvg + notional) / newQty : price;
+      newCash = cash - notional - fees;
+
+      if (holding) {
+        const { error: updateError } = await db
+          .from("holdings")
+          .update({ quantity: newQty, avg_cost: newAvg, last_price: price, name: data.name })
+          .eq("id", holding.id);
+        if (updateError) throw new Error(updateError.message);
+      } else {
+        const { error: insertError } = await db.from("holdings").insert({
+          user_id: context.userId,
+          market: data.market,
+          symbol: data.symbol,
+          name: data.name,
+          quantity: data.quantity,
+          avg_cost: price,
+          last_price: price,
+        });
+        if (insertError) throw new Error(insertError.message);
+      }
+    } else {
+      newQty = oldQty - data.quantity;
+      newCash = cash + notional - fees;
+      if (holding) {
+        const q = newQty <= 0
+          ? db.from("holdings").delete().eq("id", holding.id)
+          : db.from("holdings").update({ quantity: newQty, last_price: price }).eq("id", holding.id);
+        const { error: updateError } = await q;
+        if (updateError) throw new Error(updateError.message);
+      }
+    }
+
+    const { error: cashError } = await db
+      .from("accounts")
+      .update({ balance_usd: newCash })
+      .eq("id", account.id);
+    if (cashError) throw new Error(cashError.message);
+
+    const { data: tx, error: txError } = await db
+      .from("transactions")
+      .insert({
+        user_id: context.userId,
+        market: data.market,
+        symbol: data.symbol,
+        side: data.side,
+        order_type: "market",
+        quantity: data.quantity,
+        price,
+        fees,
+        status: "filled",
+        mode: "sim",
+        notes: "Terminal paper fill using server-verified Alpaca reference price",
+      })
+      .select("id")
+      .single();
+    if (txError) throw new Error(txError.message);
+
+    return {
+      transaction_id: tx.id,
+      symbol: data.symbol,
+      market: data.market,
+      side: data.side,
+      quantity: data.quantity,
+      price,
+      notional,
+      fees,
+      cash: newCash,
+      position_quantity: newQty,
+      average_cost: newAvg,
     };
   });
