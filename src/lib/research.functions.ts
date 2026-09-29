@@ -1,10 +1,12 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import {
+  isQuantEngineConfigured,
   quantEngineRequest,
   type EngineMessage,
   type EngineSession,
 } from "@/lib/quant-engine.server";
+import { geminiGenerate, isGeminiConfigured } from "@/lib/gemini.server";
 
 const cleanPrompt = (value: unknown) => {
   const prompt = String(value ?? "").trim();
@@ -103,4 +105,57 @@ export const cancelResearch = createServerFn({ method: "POST" })
     await quantEngineRequest(`/sessions/${row.engine_session_id}/cancel`, { method: "POST" });
     await db.from("research_runs").update({ status: "cancelled" }).eq("id", row.id);
     return { ok: true };
+  });
+
+
+export const getResearchCapabilities = createServerFn({ method: "GET" })
+  .middleware([requireSupabaseAuth])
+  .handler(async () => ({
+    vibe: isQuantEngineConfigured(),
+    gemini: isGeminiConfigured(),
+  }));
+
+export const askGeminiResearch = createServerFn({ method: "POST" })
+  .middleware([requireSupabaseAuth])
+  .inputValidator((input: { prompt: string }) => ({ prompt: cleanPrompt(input?.prompt) }))
+  .handler(async ({ data, context }) => {
+    if (!isGeminiConfigured()) throw new Error("Gemini is not configured.");
+
+    const db = context.supabase as any;
+    const [holdings, accounts, signals, news] = await Promise.all([
+      db.from("holdings").select("market, symbol, name, quantity, avg_cost, last_price").eq("user_id", context.userId),
+      db.from("accounts").select("market, label, balance_usd, equity_usd").eq("user_id", context.userId),
+      db.from("signals").select("market, symbol, direction, confidence, ai_reason, created_at").eq("user_id", context.userId).order("created_at", { ascending: false }).limit(12),
+      db.from("news_items").select("source, title, summary, symbols, published_at").eq("user_id", context.userId).order("published_at", { ascending: false }).limit(12),
+    ]);
+
+    const snapshot = {
+      holdings: holdings.data ?? [],
+      accounts: accounts.data ?? [],
+      signals: signals.data ?? [],
+      news: news.data ?? [],
+    };
+
+    const reply = await geminiGenerate(
+      `User question: ${data.prompt}
+
+Terminal account context:
+${JSON.stringify(snapshot)}`,
+      {
+        system: `You are Terminal Research, a rigorous market research assistant.
+Use the supplied account context when relevant. Do not invent current prices, backtest statistics, filings, news, or sources.
+If a claim needs live/current evidence that is not present, say what data is missing.
+Separate: observations, hypotheses, risks, and what to test next.
+Never present a strategy as guaranteed or turn analysis into an automatic live order.
+Keep the answer concise but analytical.`,
+        temperature: 0.2,
+        maxOutputTokens: 2200,
+      },
+    );
+
+    return {
+      provider: "gemini" as const,
+      reply,
+      createdAt: new Date().toISOString(),
+    };
   });
