@@ -1,43 +1,27 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
+import { ArrowRight, BrainCircuit, Search } from "lucide-react";
 import { toast } from "sonner";
-import { Bot, ChevronDown, ChevronUp, Search, X } from "lucide-react";
 
 import { AppShell } from "@/components/AppShell";
-import { TradingChart } from "@/components/TradingChart";
-import { askAdvisor } from "@/lib/advisor.functions";
+import { CandleChart } from "@/components/CandleChart";
 import { supabase } from "@/integrations/supabase/client";
 import { useAccounts, useHoldings, useTransactions, useWatchlist } from "@/lib/db";
-import { MARKET_LABEL, num, usd } from "@/lib/format";
-import { buildDepth } from "@/lib/market-data";
+import { MARKET_LABEL, num, pct, timeAgo, usd } from "@/lib/format";
+import { getMarketSnapshot } from "@/lib/market.functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/trade")({
   validateSearch: (search: Record<string, unknown>) => ({
-    symbol: typeof search["symbol"] === "string" ? (search["symbol"] as string) : undefined,
+    symbol: typeof search["symbol"] === "string" ? String(search["symbol"]) : undefined,
   }),
-  head: () => ({
-    meta: [
-      { title: "Trade — Aurum Terminal" },
-      {
-        name: "description",
-        content:
-          "Paper execution built like TradingView — watchlist, candles, depth and a one-click order ticket.",
-      },
-      { property: "og:title", content: "Trade — Aurum Terminal" },
-      {
-        property: "og:description",
-        content: "Place sized, risk-managed paper trades across crypto and stocks.",
-      },
-    ],
-  }),
+  head: () => ({ meta: [{ title: "Paper trade — Terminal" }] }),
   component: Trade,
 });
 
-const FALLBACK: Record<string, number> = { crypto: 2400, stocks: 180 };
-const USE_DIGITS = (p: number) => (p < 5 ? 3 : 2);
+type Instrument = { symbol: string; market: string; name: string; recorded: number | null };
 
 function Trade() {
   const { symbol: initialSymbol } = Route.useSearch();
@@ -45,453 +29,127 @@ function Trade() {
   const watch = useWatchlist();
   const accounts = useAccounts();
   const tx = useTransactions(30);
+  const fetchSnapshot = useServerFn(getMarketSnapshot);
   const qc = useQueryClient();
+  const [query, setQuery] = useState("");
 
-  const universe = useMemo(() => {
-    const map = new Map<string, { symbol: string; market: string; name: string; price: number }>();
-    for (const h of holdings.data ?? [])
-      map.set(h.symbol, {
-        symbol: h.symbol,
-        market: h.market,
-        name: h.name ?? h.symbol,
-        price: Number(h.last_price) || FALLBACK[h.market] || 100,
-      });
-    for (const w of watch.data ?? [])
-      if (!map.has(w.symbol))
-        map.set(w.symbol, {
-          symbol: w.symbol,
-          market: w.market,
-          name: w.name ?? w.symbol,
-          price: FALLBACK[w.market] ?? 100,
-        });
+  const universe = useMemo<Instrument[]>(() => {
+    const map = new Map<string, Instrument>();
+    for (const h of holdings.data ?? []) map.set(h.symbol, { symbol: h.symbol, market: h.market, name: h.name ?? h.symbol, recorded: Number(h.last_price) > 0 ? Number(h.last_price) : null });
+    for (const w of watch.data ?? []) if (!map.has(w.symbol)) map.set(w.symbol, { symbol: w.symbol, market: w.market, name: w.name ?? w.symbol, recorded: null });
     return [...map.values()].sort((a, b) => a.symbol.localeCompare(b.symbol));
   }, [holdings.data, watch.data]);
 
   const [active, setActive] = useState(initialSymbol ?? "");
-  const selected = useMemo(
-    () => universe.find((u) => u.symbol === active) ?? universe[0] ?? null,
-    [universe, active],
-  );
-  useEffect(() => {
-    if (!active && selected) setActive(selected.symbol);
-  }, [active, selected]);
+  const selected = universe.find((u) => u.symbol === active) ?? universe[0] ?? null;
+  useEffect(() => { if (!active && selected) setActive(selected.symbol); }, [active, selected]);
 
-  const depth = useMemo(
-    () => (selected ? buildDepth(selected.price, selected.symbol) : { bids: [], asks: [] }),
-    [selected],
-  );
+  const snapshot = useQuery({
+    queryKey: ["trade-market-snapshot", selected?.market, selected?.symbol],
+    queryFn: () => fetchSnapshot({ data: { symbol: selected!.symbol, market: selected!.market } }),
+    enabled: Boolean(selected),
+    staleTime: 45_000,
+  });
 
-  const [query, setQuery] = useState("");
-
-  const watchRows = useMemo(() => {
+  const price = snapshot.data?.latest ?? selected?.recorded ?? null;
+  const rows = universe.filter((u) => {
     const q = query.trim().toLowerCase();
-    return universe.filter(
-      (u) => !q || u.symbol.toLowerCase().includes(q) || (u.name ?? "").toLowerCase().includes(q),
-    );
-  }, [universe, query]);
+    return !q || u.symbol.toLowerCase().includes(q) || u.name.toLowerCase().includes(q);
+  });
 
   return (
-    <AppShell
-      title="Trade"
-      subtitle="Paper execution — every fill updates your live portfolio"
-      noPad
-    >
-      {/* Main trading layout */}
-      <div className="flex h-[calc(100vh-9rem)] min-h-0 flex-col gap-0 overflow-hidden lg:flex-row">
-        {/* Watchlist */}
-        <div className="flex w-full shrink-0 flex-col border-b border-border/70 bg-black/40 lg:w-[13rem] lg:border-b-0 lg:border-r lg:border-border/70">
-          <div className="border-b border-border/50 px-2 py-2">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search…"
-                className="w-full rounded-md border border-border/50 bg-background/40 py-1.5 pl-7 pr-2 text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-gold/40"
-              />
-            </div>
+    <AppShell title="Trade" subtitle="Paper execution using verified or explicitly recorded prices" noPad>
+      <div className="grid min-h-[calc(100vh-7rem)] grid-cols-1 lg:grid-cols-[15rem_minmax(0,1fr)_20rem]">
+        <aside className="border-b border-border bg-card/40 lg:border-b-0 lg:border-r">
+          <div className="p-3">
+            <label className="relative block">
+              <Search className="absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search watchlist" className="w-full rounded-xl border border-border bg-background/60 py-2 pl-9 pr-3 text-xs outline-none focus:border-primary/35" />
+            </label>
           </div>
-          <div className="flex items-center gap-2 border-b border-border/40 px-2 py-1.5 text-[9px] font-medium uppercase tracking-widest text-muted-foreground/60">
-            <span className="min-w-0 flex-1">Symbol</span>
-            <span className="num w-16 text-right">Last</span>
-            <span className="num w-12 text-right">Chg%</span>
+          <div className="divide-y divide-border">
+            {rows.map((u) => (
+              <button key={u.symbol} onClick={() => setActive(u.symbol)} className={cn("grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-2 px-4 py-3 text-left", selected?.symbol === u.symbol ? "bg-primary/[0.07]" : "hover:bg-white/[0.025]")}>
+                <span className="min-w-0"><span className="block truncate text-xs font-semibold">{u.symbol}</span><span className="block truncate text-[9px] text-muted-foreground">{MARKET_LABEL[u.market] ?? u.market}</span></span>
+                <span className="num text-[10px] text-muted-foreground">{u.recorded != null ? usd(u.recorded, u.recorded < 5 ? 3 : 2) : "—"}</span>
+              </button>
+            ))}
+            {rows.length === 0 && <div className="px-4 py-8 text-center text-xs text-muted-foreground">No tracked symbols.</div>}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto lg:max-h-full">
-            {watchRows.length === 0 && (
-              <p className="px-3 py-6 text-center text-xs text-muted-foreground">No symbols.</p>
-            )}
-            {watchRows.map((u) => {
-              const pos = (holdings.data ?? []).find((h) => h.symbol === u.symbol);
-              const chg =
-                ((u.price - u.price / 1.02) / (u.price / 1.02)) *
-                100 *
-                (Math.sin(u.symbol.charCodeAt(0)) > 0 ? 1 : -1);
-              const isSel = selected?.symbol === u.symbol;
-              return (
-                <button
-                  key={u.symbol}
-                  type="button"
-                  onClick={() => setActive(u.symbol)}
-                  className={cn(
-                    "flex w-full items-center gap-2 border-b border-border/30 px-2 py-2 text-left transition-all",
-                    isSel
-                      ? "bg-gold/10 text-foreground"
-                      : "hover:bg-secondary/40 text-foreground/80",
-                  )}
-                >
-                  {isSel && <span className="absolute left-0 h-8 w-0.5 rounded-full bg-gold" />}
-                  <span className="min-w-0 flex-1">
-                    <span
-                      className={cn(
-                        "block truncate text-xs font-semibold",
-                        isSel && "text-gold-soft",
-                      )}
-                    >
-                      {u.symbol}
-                      {pos && (
-                        <span className="ml-1 text-[9px] opacity-60">·{num(pos.quantity, 2)}</span>
-                      )}
-                    </span>
-                    <span className="block truncate text-[9px] text-muted-foreground">
-                      {MARKET_LABEL[u.market] ?? u.market}
-                    </span>
-                  </span>
-                  <span className="num w-16 text-right text-xs">
-                    {num(u.price, USE_DIGITS(u.price))}
-                  </span>
-                  <span
-                    className={cn(
-                      "num w-12 text-right text-[10px]",
-                      chg >= 0 ? "text-bull" : "text-bear",
-                    )}
-                  >
-                    {chg >= 0 ? "+" : ""}
-                    {chg.toFixed(1)}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
+        </aside>
 
-        {/* Chart */}
-        <div className="min-h-0 flex-1 overflow-hidden border-b border-border/70 bg-black lg:border-b-0 lg:border-r lg:border-border/70">
-          {selected ? (
-            <TradingChart symbol={selected.symbol} price={selected.price} />
+        <section className="min-w-0 border-b border-border lg:border-b-0 lg:border-r">
+          {!selected ? (
+            <div className="flex h-full min-h-96 items-center justify-center p-8 text-center text-sm text-muted-foreground">Add a watchlist symbol or position first.</div>
           ) : (
-            <div className="flex h-full items-center justify-center">
-              <p className="text-sm text-muted-foreground">
-                Add a holding or watchlist symbol to start.
-              </p>
-            </div>
+            <>
+              <div className="flex items-end justify-between gap-5 border-b border-border p-5">
+                <div><div className="text-[10px] text-muted-foreground">{MARKET_LABEL[selected.market] ?? selected.market}</div><h2 className="mt-1 text-xl font-semibold">{selected.symbol}</h2><div className="mt-1 text-[11px] text-muted-foreground">{selected.name}</div></div>
+                <div className="text-right"><div className="num text-2xl font-semibold">{price != null ? usd(price, price < 5 ? 3 : 2) : "—"}</div>{snapshot.data?.changePct != null && <div className={cn("num mt-1 text-[10px]", snapshot.data.changePct >= 0 ? "text-bull" : "text-bear")}>{pct(snapshot.data.changePct)} last session</div>}</div>
+              </div>
+              {snapshot.data?.bars?.length ? (
+                <div className="p-4">
+                  <div className="mb-3 flex items-center justify-between text-[10px] text-muted-foreground"><span>Alpaca daily bars</span><span>{snapshot.data.asOf ? new Date(snapshot.data.asOf).toLocaleDateString() : ""}</span></div>
+                  <div className="h-[30rem]"><CandleChart candles={snapshot.data.bars} /></div>
+                </div>
+              ) : (
+                <div className="flex min-h-[30rem] flex-col items-center justify-center p-8 text-center">
+                  <div className="text-sm font-medium">Chart unavailable</div>
+                  <div className="mt-2 max-w-sm text-xs leading-5 text-muted-foreground">{snapshot.data?.message ?? "Connect market data for a verified chart."}</div>
+                  <Link to="/connections" className="mt-4 rounded-xl border border-border px-3 py-2 text-xs">Open connections</Link>
+                </div>
+              )}
+            </>
           )}
-        </div>
+        </section>
 
-        {/* Right column: Order panel + AI */}
-        <div className="flex w-full shrink-0 flex-col gap-0 overflow-y-auto bg-black/20 lg:w-[19rem]">
-          <OrderPanel
-            universe={universe}
+        <aside className="bg-card/30">
+          <OrderTicket
             selected={selected}
-            depth={depth}
-            cash={
-              (accounts.data ?? []).find((a) => a.market === selected?.market)?.balance_usd ?? 0
-            }
+            price={price}
+            cash={(accounts.data ?? []).find((a) => a.market === selected?.market)?.balance_usd ?? 0}
             position={(holdings.data ?? []).find((h) => h.symbol === selected?.symbol) ?? null}
-            onSelect={setActive}
-            onFilled={() =>
-              ["holdings", "accounts", "transactions"].forEach((k) =>
-                qc.invalidateQueries({ queryKey: [k] }),
-              )
-            }
+            onFilled={() => ["holdings", "accounts", "transactions"].forEach((k) => qc.invalidateQueries({ queryKey: [k] }))}
           />
-          <GeminiPanel symbol={selected?.symbol ?? null} />
-        </div>
+          {selected && <div className="border-t border-border p-4"><Link to="/research" className="flex items-center justify-between rounded-2xl border border-border p-3 text-xs font-medium hover:border-primary/25"><span className="flex items-center gap-2"><BrainCircuit className="h-4 w-4 text-primary" />Research {selected.symbol}</span><ArrowRight className="h-3.5 w-3.5" /></Link></div>}
+        </aside>
       </div>
 
-      {/* Recent fills */}
-      <div className="border-t border-border/60 bg-black/30">
-        <div className="flex items-center gap-4 border-b border-border/40 px-4 py-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-          <span>Recent fills</span>
-          <span className="ml-auto rounded-full border border-gold/30 bg-gold/10 px-2 py-0.5 text-[9px] text-gold-soft">
-            Sim
-          </span>
-        </div>
+      <section className="border-t border-border bg-card/30">
+        <div className="border-b border-border px-4 py-3 text-xs font-semibold">Recent paper fills</div>
         <div className="overflow-x-auto">
-          {(tx.data ?? []).length === 0 ? (
-            <p className="px-4 py-5 text-center text-xs text-muted-foreground">
-              No fills yet. Place a trade above.
-            </p>
-          ) : (
-            <table className="w-full min-w-[36rem] text-xs">
-              <tbody>
-                {(tx.data ?? []).map((t) => (
-                  <tr
-                    key={t.id}
-                    className="border-b border-border/30 last:border-0 hover:bg-secondary/20"
-                  >
-                    <td className="px-4 py-2 font-semibold text-foreground">{t.symbol}</td>
-                    <td className="px-3 py-2">
-                      <span
-                        className={cn("font-bold", t.side === "buy" ? "text-bull" : "text-bear")}
-                      >
-                        {t.side.toUpperCase()}
-                      </span>
-                    </td>
-                    <td className="num px-3 py-2 text-right text-muted-foreground">
-                      {num(t.quantity, 4)}
-                    </td>
-                    <td className="num px-3 py-2 text-right text-muted-foreground">
-                      {usd(t.price, USE_DIGITS(t.price))}
-                    </td>
-                    <td className="num px-3 py-2 text-right font-medium text-foreground">
-                      {usd(t.quantity * t.price)}
-                    </td>
-                    <td className="px-3 py-2 text-right text-muted-foreground/60">
-                      {new Date(t.executed_at).toLocaleTimeString()}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
+          {(tx.data ?? []).length === 0 ? <div className="px-4 py-8 text-center text-xs text-muted-foreground">No fills yet.</div> : (
+            <table className="w-full min-w-[42rem] text-xs">
+              <tbody>{(tx.data ?? []).map((t) => <tr key={t.id} className="border-b border-border last:border-0"><td className="px-4 py-3 font-semibold">{t.symbol}</td><td className={cn("px-4 py-3 font-semibold", t.side === "buy" ? "text-bull" : "text-bear")}>{t.side.toUpperCase()}</td><td className="num px-4 py-3 text-right">{num(t.quantity, 4)}</td><td className="num px-4 py-3 text-right">{usd(t.price)}</td><td className="num px-4 py-3 text-right">{usd(t.quantity * t.price)}</td><td className="px-4 py-3 text-right text-muted-foreground">{timeAgo(t.executed_at)}</td></tr>)}</tbody>
             </table>
           )}
         </div>
-      </div>
+      </section>
     </AppShell>
   );
 }
 
-/* ─── Gemini AI panel ────────────────────────────────────────────── */
-
-function GeminiPanel({ symbol }: { symbol: string | null }) {
-  const ask = useServerFn(askAdvisor);
-  const [open, setOpen] = useState(false);
-  const [input, setInput] = useState("");
-  const [pending, setPending] = useState(false);
-  const [messages, setMessages] = useState<{ role: "user" | "ai"; content: string }[]>([]);
-  const endRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, pending]);
-
-  // Pre-fill prompt when symbol changes
-  useEffect(() => {
-    if (symbol) setInput(`Analyse ${symbol} for me`);
-  }, [symbol]);
-
-  async function send(prompt: string) {
-    if (!prompt.trim() || pending) return;
-    const userMsg = prompt.trim();
-    setInput("");
-    setMessages((m) => [...m, { role: "user", content: userMsg }]);
-    setPending(true);
-    try {
-      const res = await ask({ data: { prompt: userMsg } });
-      setMessages((m) => [...m, { role: "ai", content: res.reply }]);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Advisor unavailable");
-      setMessages((m) => [
-        ...m,
-        { role: "ai", content: "Sorry — could not reach the advisor. Try again." },
-      ]);
-    } finally {
-      setPending(false);
-    }
-  }
-
-  return (
-    <div
-      className={cn(
-        "flex flex-col border-t border-border/50 transition-all duration-300",
-        open ? "min-h-[16rem]" : "",
-      )}
-    >
-      {/* Header toggle */}
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className="flex items-center gap-2 border-b border-border/40 px-3 py-2.5 text-left hover:bg-secondary/30 transition-colors"
-      >
-        <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-gold/20">
-          <Bot className="h-3.5 w-3.5 text-gold" />
-        </div>
-        <span className="flex-1 text-xs font-semibold text-gold-soft">Ask Gemini</span>
-        {symbol && <span className="num text-[10px] text-muted-foreground">{symbol}</span>}
-        {open ? (
-          <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-        ) : (
-          <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
-      </button>
-
-      {open && (
-        <div className="flex min-h-0 flex-1 flex-col fade-up">
-          {/* Messages */}
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
-            {messages.length === 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[11px] text-muted-foreground">
-                  Ask anything about {symbol ?? "this symbol"}:
-                </p>
-                {[
-                  `What's the risk on ${symbol ?? "this"}?`,
-                  "How should I size this position?",
-                  "Is now a good entry?",
-                ].map((q) => (
-                  <button
-                    key={q}
-                    type="button"
-                    onClick={() => void send(q)}
-                    className="block w-full rounded-lg border border-border/50 px-2.5 py-1.5 text-left text-[11px] text-muted-foreground transition-colors hover:border-gold/30 hover:text-foreground"
-                  >
-                    {q}
-                  </button>
-                ))}
-              </div>
-            )}
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={cn("flex", m.role === "user" ? "justify-end" : "justify-start")}
-              >
-                <div
-                  className={cn(
-                    "max-w-[90%] rounded-xl px-3 py-2 text-[11px] leading-relaxed",
-                    m.role === "user"
-                      ? "bg-gold/15 text-foreground"
-                      : "border border-border/50 bg-secondary/40 text-muted-foreground",
-                  )}
-                >
-                  {m.content}
-                </div>
-              </div>
-            ))}
-            {pending && (
-              <div className="flex justify-start">
-                <div className="rounded-xl border border-border/50 bg-secondary/40 px-3 py-2 text-[11px] text-muted-foreground">
-                  <span className="inline-flex gap-1">
-                    <span
-                      className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-gold"
-                      style={{ animationDelay: "0ms" }}
-                    />
-                    <span
-                      className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-gold"
-                      style={{ animationDelay: "300ms" }}
-                    />
-                    <span
-                      className="live-dot inline-block h-1.5 w-1.5 rounded-full bg-gold"
-                      style={{ animationDelay: "600ms" }}
-                    />
-                  </span>
-                </div>
-              </div>
-            )}
-            <div ref={endRef} />
-          </div>
-
-          {/* Input */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              void send(input);
-            }}
-            className="flex gap-1.5 border-t border-border/40 p-2"
-          >
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              placeholder="Ask Gemini…"
-              className="input-base text-[12px] py-1.5"
-              disabled={pending}
-            />
-            {input && (
-              <button
-                type="button"
-                onClick={() => setInput("")}
-                className="shrink-0 text-muted-foreground hover:text-foreground"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
-            )}
-            <button
-              type="submit"
-              disabled={pending || !input.trim()}
-              className="shrink-0 rounded-lg bg-gold px-3 py-1.5 text-[11px] font-bold text-background transition-opacity hover:opacity-90 disabled:opacity-40"
-            >
-              Ask
-            </button>
-          </form>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/* ─── Order panel ─────────────────────────────────────────────────── */
-
-type Selected = { symbol: string; market: string; name: string; price: number } | null;
-
-function OrderPanel({
-  universe,
-  selected,
-  depth,
-  cash,
-  position,
-  onSelect,
-  onFilled,
-}: {
-  universe: { symbol: string; market: string; name: string }[];
-  selected: Selected;
-  depth: { bids: { price: number; size: number }[]; asks: { price: number; size: number }[] };
-  cash: number;
-  position: { id: string; quantity: number; avg_cost: number } | null;
-  onSelect: (s: string) => void;
-  onFilled: () => void;
-}) {
+function OrderTicket({ selected, price, cash, position, onFilled }: { selected: Instrument | null; price: number | null; cash: number; position: { id: string; quantity: number; avg_cost: number } | null; onFilled: () => void }) {
   const [side, setSide] = useState<"buy" | "sell">("buy");
-  const [orderType, setOrderType] = useState<"market" | "limit">("market");
   const [qty, setQty] = useState("");
-  const [limitPrice, setLimitPrice] = useState("");
-  const [stop, setStop] = useState("");
-  const [target, setTarget] = useState("");
   const [pending, setPending] = useState(false);
-
-  useEffect(() => {
-    setQty("");
-    setLimitPrice("");
-    setStop("");
-    setTarget("");
-  }, [selected?.symbol]);
-
-  const price =
-    orderType === "limit" && Number(limitPrice) > 0 ? Number(limitPrice) : (selected?.price ?? 0);
   const quantity = Number(qty) || 0;
-  const notional = quantity * price;
-  const riskUsd = Number(stop) > 0 && quantity > 0 ? Math.abs(price - Number(stop)) * quantity : 0;
-  const bestBid = depth.bids[0]?.price ?? selected?.price ?? 0;
-  const bestAsk = depth.asks[depth.asks.length - 1]?.price ?? selected?.price ?? 0;
-  const spread = bestAsk - bestBid;
+  const notional = price != null ? quantity * price : 0;
+
+  useEffect(() => setQty(""), [selected?.symbol]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (!selected) return;
-    if (quantity <= 0) {
-      toast.error("Enter a quantity greater than zero.");
-      return;
-    }
-    if (side === "buy" && notional > cash) {
-      toast.error("Insufficient sim cash.");
-      return;
-    }
-    if (side === "sell" && quantity > Number(position?.quantity ?? 0)) {
-      toast.error("You cannot sell more than you hold.");
-      return;
-    }
+    if (!selected || price == null || price <= 0) return toast.error("A verified or recorded price is required.");
+    if (quantity <= 0) return toast.error("Enter a quantity.");
+    if (side === "buy" && notional > cash) return toast.error("Not enough paper cash.");
+    if (side === "sell" && quantity > Number(position?.quantity ?? 0)) return toast.error("You cannot sell more than the paper position.");
 
     setPending(true);
     try {
       const { data: auth } = await supabase.auth.getUser();
-      const userId = auth.user!.id;
+      if (!auth.user) throw new Error("Sign in again.");
+      const userId = auth.user.id;
       const fees = notional * 0.001;
 
       const { error: txError } = await supabase.from("transactions").insert({
@@ -499,287 +157,61 @@ function OrderPanel({
         market: selected.market,
         symbol: selected.symbol,
         side,
-        order_type: orderType,
+        order_type: "market",
         quantity,
         price,
         fees,
-        stop_price: Number(stop) > 0 ? Number(stop) : null,
-        target_price: Number(target) > 0 ? Number(target) : null,
         status: "filled",
         mode: "sim",
+        notes: "Paper market fill at the displayed Terminal reference price",
       });
       if (txError) throw txError;
 
-      const pos = position;
       if (side === "buy") {
-        if (pos) {
-          const newQty = Number(pos.quantity) + quantity;
-          const newAvg =
-            (Number(pos.quantity) * Number(pos.avg_cost) + quantity * price) / (newQty || 1);
-          const { error } = await supabase
-            .from("holdings")
-            .update({ quantity: newQty, avg_cost: newAvg, last_price: price })
-            .eq("id", pos.id);
+        if (position) {
+          const oldQty = Number(position.quantity);
+          const newQty = oldQty + quantity;
+          const newAvg = (oldQty * Number(position.avg_cost) + notional) / newQty;
+          const { error } = await supabase.from("holdings").update({ quantity: newQty, avg_cost: newAvg, last_price: price }).eq("id", position.id);
           if (error) throw error;
         } else {
-          const { error } = await supabase.from("holdings").insert({
-            user_id: userId,
-            market: selected.market,
-            symbol: selected.symbol,
-            name: selected.name,
-            quantity,
-            avg_cost: price,
-            last_price: price,
-          });
+          const { error } = await supabase.from("holdings").insert({ user_id: userId, market: selected.market, symbol: selected.symbol, name: selected.name, quantity, avg_cost: price, last_price: price });
           if (error) throw error;
         }
-      } else if (pos) {
-        const newQty = Number(pos.quantity) - quantity;
-        const { error } =
-          newQty <= 0
-            ? await supabase.from("holdings").delete().eq("id", pos.id)
-            : await supabase
-                .from("holdings")
-                .update({ quantity: newQty, last_price: price })
-                .eq("id", pos.id);
-        if (error) throw error;
+      } else if (position) {
+        const newQty = Number(position.quantity) - quantity;
+        const result = newQty <= 0 ? await supabase.from("holdings").delete().eq("id", position.id) : await supabase.from("holdings").update({ quantity: newQty, last_price: price }).eq("id", position.id);
+        if (result.error) throw result.error;
       }
 
-      const account = await supabase
-        .from("accounts")
-        .select("id, balance_usd")
-        .eq("market", selected.market)
-        .maybeSingle();
-      const acc = account.data;
-      if (acc?.id) {
+      const account = await supabase.from("accounts").select("id, balance_usd").eq("market", selected.market).maybeSingle();
+      if (account.data?.id) {
         const delta = side === "buy" ? -(notional + fees) : notional - fees;
-        const { error } = await supabase
-          .from("accounts")
-          .update({ balance_usd: (acc.balance_usd ?? 0) + delta })
-          .eq("id", acc.id);
+        const { error } = await supabase.from("accounts").update({ balance_usd: Number(account.data.balance_usd) + delta }).eq("id", account.data.id);
         if (error) throw error;
       }
-
-      toast.success(`${side === "buy" ? "Bought" : "Sold"} ${num(quantity, 4)} ${selected.symbol}`);
       setQty("");
-      setStop("");
-      setTarget("");
       onFilled();
+      toast.success((side === "buy" ? "Bought " : "Sold ") + num(quantity, 4) + " " + selected.symbol + " in paper mode");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Order failed");
+      toast.error(err instanceof Error ? err.message : "Paper order failed");
     } finally {
       setPending(false);
     }
   }
 
-  const buyBtn = side === "buy";
-
-  return (
-    <div className="flex min-h-0 flex-col border-b border-border/50">
-      {/* Buy/Sell tabs */}
-      <div className="grid grid-cols-2 gap-1 p-2">
-        <button
-          type="button"
-          onClick={() => setSide("buy")}
-          className={cn(
-            "rounded-lg py-2.5 text-xs font-bold uppercase tracking-[0.16em] transition-all",
-            buyBtn ? "bg-bull text-black shadow-md shadow-bull/30" : "text-bull/50 hover:text-bull",
-          )}
-        >
-          Buy
-        </button>
-        <button
-          type="button"
-          onClick={() => setSide("sell")}
-          className={cn(
-            "rounded-lg py-2.5 text-xs font-bold uppercase tracking-[0.16em] transition-all",
-            !buyBtn
-              ? "bg-bear text-black shadow-md shadow-bear/30"
-              : "text-bear/50 hover:text-bear",
-          )}
-        >
-          Sell
-        </button>
-      </div>
-
-      <form onSubmit={submit} className="flex flex-col gap-2.5 overflow-y-auto p-3 pt-1">
-        {/* Symbol */}
-        <label className="block">
-          <span className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">
-            Instrument
-          </span>
-          <select
-            value={selected?.symbol ?? ""}
-            onChange={(e) => onSelect(e.target.value)}
-            className="w-full rounded-lg border border-border/60 bg-secondary/40 px-2.5 py-2 text-xs text-foreground outline-none focus:border-gold/40"
-          >
-            {universe.map((u) => (
-              <option key={u.symbol} value={u.symbol}>
-                {u.symbol} — {MARKET_LABEL[u.market] ?? u.market}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {/* Order type */}
-        <div className="grid grid-cols-2 gap-1 rounded-lg border border-border/50 p-1">
-          {(["market", "limit"] as const).map((t) => (
-            <button
-              key={t}
-              type="button"
-              onClick={() => setOrderType(t)}
-              className={cn(
-                "rounded-md py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] transition-colors",
-                orderType === t
-                  ? "bg-foreground text-background"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {t}
-            </button>
-          ))}
-        </div>
-
-        {/* Qty + Price */}
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Quantity">
-            <input
-              value={qty}
-              onChange={(e) => setQty(e.target.value)}
-              inputMode="decimal"
-              placeholder="0.00"
-              className="input-mono"
-            />
-          </Field>
-          <Field label={orderType === "limit" ? "Limit price" : "Est. price"}>
-            <input
-              value={orderType === "limit" ? limitPrice : price.toFixed(USE_DIGITS(price))}
-              onChange={(e) => setLimitPrice(e.target.value)}
-              disabled={orderType === "market"}
-              inputMode="decimal"
-              className="input-mono disabled:opacity-40"
-            />
-          </Field>
-        </div>
-
-        {/* % quick-size */}
-        <div className="flex gap-1">
-          {[0.25, 0.5, 0.75, 1].map((f) => (
-            <button
-              key={f}
-              type="button"
-              onClick={() => {
-                const base =
-                  side === "buy" ? (cash * f) / (price || 1) : Number(position?.quantity ?? 0) * f;
-                setQty(base.toFixed(base < 1 ? 4 : 2));
-              }}
-              className={cn(
-                "flex-1 rounded-lg border py-1.5 text-[10px] font-semibold transition-all",
-                "border-border/50 text-muted-foreground hover:border-gold/40 hover:bg-gold/5 hover:text-gold-soft",
-              )}
-            >
-              {f * 100}%
-            </button>
-          ))}
-        </div>
-
-        {/* Stop/Target */}
-        <div className="grid grid-cols-2 gap-2">
-          <Field label="Stop">
-            <input
-              value={stop}
-              onChange={(e) => setStop(e.target.value)}
-              inputMode="decimal"
-              placeholder="optional"
-              className="input-mono"
-            />
-          </Field>
-          <Field label="Target">
-            <input
-              value={target}
-              onChange={(e) => setTarget(e.target.value)}
-              inputMode="decimal"
-              placeholder="optional"
-              className="input-mono"
-            />
-          </Field>
-        </div>
-
-        {/* Summary */}
-        <dl className="space-y-1.5 rounded-xl border border-border/40 bg-secondary/20 p-3 text-[11px]">
-          <Row label="Est. value" value={usd(notional)} />
-          <Row label="Fees (0.10%)" value={usd(notional * 0.001)} muted />
-          <Row label="Risk at stop" value={riskUsd ? usd(riskUsd) : "—"} muted />
-          <Row
-            label="Cash after"
-            value={usd(side === "buy" ? cash - notional * 1.001 : cash + notional * 0.999)}
-          />
-        </dl>
-
-        {/* Submit */}
-        <button
-          type="submit"
-          disabled={pending}
-          className={cn(
-            "w-full rounded-xl py-3 text-xs font-bold uppercase tracking-[0.16em] transition-all hover:opacity-90 disabled:opacity-40",
-            buyBtn
-              ? "bg-bull text-black shadow-md shadow-bull/20"
-              : "bg-bear text-black shadow-md shadow-bear/20",
-          )}
-        >
-          {pending ? "Placing fill…" : `${side} ${selected?.symbol ?? ""}`}
-        </button>
-
-        {/* Bid/Ask */}
-        <div className="grid grid-cols-3 gap-1 text-[10px]">
-          <div className="rounded-lg border border-border/40 bg-bull/5 p-2 text-center">
-            <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Bid</p>
-            <p className="num mt-0.5 font-semibold text-bull">
-              {num(bestBid, USE_DIGITS(bestBid))}
-            </p>
-          </div>
-          <div className="rounded-lg border border-border/40 p-2 text-center">
-            <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Spread</p>
-            <p className="num mt-0.5 font-semibold text-muted-foreground">
-              {num(spread, USE_DIGITS(spread))}
-            </p>
-          </div>
-          <div className="rounded-lg border border-border/40 bg-bear/5 p-2 text-center">
-            <p className="text-[9px] uppercase tracking-widest text-muted-foreground">Ask</p>
-            <p className="num mt-0.5 font-semibold text-bear">
-              {num(bestAsk, USE_DIGITS(bestAsk))}
-            </p>
-          </div>
-        </div>
-
-        <p className="text-center text-[10px] text-muted-foreground/60">
-          Cash: {usd(cash)} · {MARKET_LABEL[selected?.market ?? ""] ?? "Sim"}
-        </p>
-      </form>
+  return <div className="p-4">
+    <div className="mb-4 flex items-center justify-between"><div><div className="text-sm font-semibold">Paper order</div><div className="mt-0.5 text-[10px] text-muted-foreground">Never routes live by default</div></div><span className="rounded-full bg-primary/10 px-2 py-1 text-[9px] font-semibold text-primary">SIM</span></div>
+    <div className="mb-4 grid grid-cols-2 rounded-xl bg-background/50 p-1">
+      <button onClick={() => setSide("buy")} type="button" className={cn("rounded-lg py-2 text-xs font-semibold", side === "buy" ? "bg-bull text-black" : "text-muted-foreground")}>Buy</button>
+      <button onClick={() => setSide("sell")} type="button" className={cn("rounded-lg py-2 text-xs font-semibold", side === "sell" ? "bg-bear text-white" : "text-muted-foreground")}>Sell</button>
     </div>
-  );
-}
-
-/* ─── Helpers ─────────────────────────────────────────────────────── */
-
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1 block text-[10px] uppercase tracking-widest text-muted-foreground">
-        {label}
-      </span>
-      {children}
-    </label>
-  );
-}
-
-function Row({ label, value, muted }: { label: string; value: string; muted?: boolean }) {
-  return (
-    <div className="flex items-center justify-between">
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className={cn("num font-medium", muted ? "text-muted-foreground" : "text-foreground")}>
-        {value}
-      </dd>
-    </div>
-  );
+    <form onSubmit={submit} className="space-y-4">
+      <label className="block"><span className="mb-1.5 block text-[10px] text-muted-foreground">Quantity</span><input value={qty} onChange={(e) => setQty(e.target.value)} inputMode="decimal" placeholder="0" className="input-mono" /></label>
+      <div className="grid grid-cols-2 gap-3 rounded-2xl border border-border p-3 text-xs"><div><div className="text-[9px] text-muted-foreground">Reference price</div><div className="num mt-1">{price != null ? usd(price) : "—"}</div></div><div className="text-right"><div className="text-[9px] text-muted-foreground">Notional</div><div className="num mt-1">{usd(notional)}</div></div></div>
+      <div className="flex justify-between text-[10px] text-muted-foreground"><span>Available cash</span><span className="num">{usd(cash)}</span></div>
+      <button disabled={pending || !selected || price == null || quantity <= 0} className={cn("w-full rounded-xl py-3 text-sm font-semibold disabled:opacity-35", side === "buy" ? "bg-bull text-black" : "bg-bear text-white")}>{pending ? "Filling…" : side === "buy" ? "Review paper buy" : "Review paper sell"}</button>
+      <p className="text-[9px] leading-4 text-muted-foreground">Paper fills use the displayed Terminal reference price plus a simulated 0.10% fee. They are not broker executions.</p>
+    </form>
+  </div>;
 }
