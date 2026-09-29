@@ -7,10 +7,10 @@ import { toast } from "sonner";
 
 import { AppShell } from "@/components/AppShell";
 import { CandleChart } from "@/components/CandleChart";
-import { supabase } from "@/integrations/supabase/client";
 import { useAccounts, useHoldings, useTransactions, useWatchlist } from "@/lib/db";
 import { MARKET_LABEL, num, pct, timeAgo, usd } from "@/lib/format";
 import { getMarketSnapshot } from "@/lib/market.functions";
+import { placePaperTrade } from "@/lib/paper-trade.functions";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/_authenticated/trade")({
@@ -133,6 +133,7 @@ function OrderTicket({ selected, price, cash, position, onFilled }: { selected: 
   const [side, setSide] = useState<"buy" | "sell">("buy");
   const [qty, setQty] = useState("");
   const [pending, setPending] = useState(false);
+  const place = useServerFn(placePaperTrade);
   const quantity = Number(qty) || 0;
   const notional = price != null ? quantity * price : 0;
 
@@ -147,52 +148,15 @@ function OrderTicket({ selected, price, cash, position, onFilled }: { selected: 
 
     setPending(true);
     try {
-      const { data: auth } = await supabase.auth.getUser();
-      if (!auth.user) throw new Error("Sign in again.");
-      const userId = auth.user.id;
-      const fees = notional * 0.001;
-
-      const { error: txError } = await supabase.from("transactions").insert({
-        user_id: userId,
-        market: selected.market,
-        symbol: selected.symbol,
-        side,
-        order_type: "market",
-        quantity,
-        price,
-        fees,
-        status: "filled",
-        mode: "sim",
-        notes: "Paper market fill at the displayed Terminal reference price",
+      const result = await place({
+        data: { market: selected.market, symbol: selected.symbol, name: selected.name, side, quantity },
       });
-      if (txError) throw txError;
-
-      if (side === "buy") {
-        if (position) {
-          const oldQty = Number(position.quantity);
-          const newQty = oldQty + quantity;
-          const newAvg = (oldQty * Number(position.avg_cost) + notional) / newQty;
-          const { error } = await supabase.from("holdings").update({ quantity: newQty, avg_cost: newAvg, last_price: price }).eq("id", position.id);
-          if (error) throw error;
-        } else {
-          const { error } = await supabase.from("holdings").insert({ user_id: userId, market: selected.market, symbol: selected.symbol, name: selected.name, quantity, avg_cost: price, last_price: price });
-          if (error) throw error;
-        }
-      } else if (position) {
-        const newQty = Number(position.quantity) - quantity;
-        const result = newQty <= 0 ? await supabase.from("holdings").delete().eq("id", position.id) : await supabase.from("holdings").update({ quantity: newQty, last_price: price }).eq("id", position.id);
-        if (result.error) throw result.error;
-      }
-
-      const account = await supabase.from("accounts").select("id, balance_usd").eq("market", selected.market).maybeSingle();
-      if (account.data?.id) {
-        const delta = side === "buy" ? -(notional + fees) : notional - fees;
-        const { error } = await supabase.from("accounts").update({ balance_usd: Number(account.data.balance_usd) + delta }).eq("id", account.data.id);
-        if (error) throw error;
-      }
       setQty("");
       onFilled();
-      toast.success((side === "buy" ? "Bought " : "Sold ") + num(quantity, 4) + " " + selected.symbol + " in paper mode");
+      toast.success(
+        (side === "buy" ? "Bought " : "Sold ") +
+          num(Number(result.quantity), 4) + " " + result.symbol + " at " + usd(Number(result.price)) + " in paper mode",
+      );
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Paper order failed");
     } finally {
