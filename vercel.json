@@ -1,9 +1,1 @@
-{
-  "crons": [
-    { "path": "/api/public/cron/prices", "schedule": "0 0 * * *" },
-    { "path": "/api/public/cron/news", "schedule": "20 0 * * *" },
-    { "path": "/api/public/cron/signals", "schedule": "40 0 * * *" },
-    { "path": "/api/public/cron/trade", "schedule": "0 1 * * *" },
-    { "path": "/api/public/cron/digest", "schedule": "30 1 * * *" }
-  ]
-}
+{}\n

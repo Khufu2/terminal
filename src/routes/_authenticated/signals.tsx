@@ -10,13 +10,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/signals")({
   head: () => ({
     meta: [
-      { title: "Signals — Aurum Terminal" },
+      { title: "Signals — Terminal" },
       {
         name: "description",
         content:
           "Ranked AI and orchestrator signals with confidence, sentiment, entry, target and stop levels.",
       },
-      { property: "og:title", content: "Signals — Aurum Terminal" },
+      { property: "og:title", content: "Signals — Terminal" },
       {
         property: "og:description",
         content: "Know what to act on: conviction-ranked signals across every market.",

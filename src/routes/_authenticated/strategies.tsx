@@ -11,12 +11,12 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/strategies")({
   head: () => ({
     meta: [
-      { title: "Strategies — Aurum Terminal" },
+      { title: "Strategies — Terminal" },
       {
         name: "description",
         content: "Switch between risk-calibrated allocation strategies and follow reputable traders in one click.",
       },
-      { property: "og:title", content: "Strategies — Aurum Terminal" },
+      { property: "og:title", content: "Strategies — Terminal" },
       { property: "og:description", content: "Shift strategy safely with preset weights, confidence gates and sizing caps." },
     ],
   }),

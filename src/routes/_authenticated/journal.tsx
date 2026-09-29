@@ -13,9 +13,9 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/journal")({
   head: () => ({
     meta: [
-      { title: "Journal — Aurum Terminal" },
+      { title: "Journal — Terminal" },
       { name: "description", content: "Log every trade's thesis, outcome and R-multiple so you can see what actually works." },
-      { property: "og:title", content: "Journal — Aurum Terminal" },
+      { property: "og:title", content: "Journal — Terminal" },
       { property: "og:description", content: "Build the habit that separates profitable traders: writing down the why." },
     ],
   }),

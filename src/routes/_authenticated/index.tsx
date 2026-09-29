@@ -176,6 +176,6 @@ function Empty({ text }: { text: string }) {
 function RiskCell({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "up" | "down" }) {
   return <div className="bg-card px-5 py-5"><div className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">{label}</div><div className={cn("num mt-1 text-lg font-semibold", tone === "up" && "text-bull", tone === "down" && "text-bear")}>{value}</div></div>;
 }
-function QuickAction({ to, icon: Icon, label }: { to: string; icon: typeof BrainCircuit; label: string }) {
+function QuickAction({ to, icon: Icon, label }: { to: "/research" | "/labs" | "/trade" | "/portfolio"; icon: typeof BrainCircuit; label: string }) {
   return <Link to={to} className="flex items-center gap-2 rounded-xl border border-border bg-white/[0.025] px-3 py-2 text-xs font-medium text-foreground transition-colors hover:border-primary/25 hover:bg-primary/[0.05]"><Icon className="h-3.5 w-3.5 text-primary" />{label}</Link>;
 }

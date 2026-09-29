@@ -12,13 +12,13 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/portfolio")({
   head: () => ({
     meta: [
-      { title: "Portfolio — Aurum Terminal" },
+      { title: "Portfolio — Terminal" },
       {
         name: "description",
         content:
           "Every holding, cost basis, unrealised P&L and allocation drift across crypto, stocks and Kalshi.",
       },
-      { property: "og:title", content: "Portfolio — Aurum Terminal" },
+      { property: "og:title", content: "Portfolio — Terminal" },
       { property: "og:description", content: "Holdings, P&L, allocation drift and trade history in one view." },
     ],
   }),

@@ -10,12 +10,12 @@ import { cn } from "@/lib/utils";
 export const Route = createFileRoute("/_authenticated/news")({
   head: () => ({
     meta: [
-      { title: "News — Aurum Terminal" },
+      { title: "News — Terminal" },
       {
         name: "description",
         content: "Sentiment-scored market headlines mapped to your holdings and watchlist, feeding the signal engine.",
       },
-      { property: "og:title", content: "News — Aurum Terminal" },
+      { property: "og:title", content: "News — Terminal" },
       { property: "og:description", content: "AI-scored headlines linked to the positions you actually hold." },
     ],
   }),
