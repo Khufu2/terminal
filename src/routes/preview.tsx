@@ -43,17 +43,17 @@ function Preview() {
             <span className="text-sm font-semibold tracking-[-0.035em]">Terminal</span>
           </div>
           <nav className="ml-6 hidden items-center gap-5 text-[11px] text-muted-foreground md:flex">
-            <span className="text-foreground">Home</span>
-            <span>Markets</span>
-            <span>Trade</span>
-            <span>Research</span>
-            <span>Labs</span>
+            <Link to="/" className="text-foreground hover:text-primary">Home</Link>
+            <Link to="/markets" className="hover:text-foreground">Markets</Link>
+            <Link to="/trade" className="hover:text-foreground">Trade</Link>
+            <Link to="/research" className="hover:text-foreground">Research</Link>
+            <Link to="/labs" className="hover:text-foreground">Labs</Link>
           </nav>
           <div className="ml-auto flex items-center gap-2">
-            <button className="hidden h-8 items-center gap-2 rounded-lg border border-border px-3 text-[10px] text-muted-foreground sm:flex">
+            <Link to="/markets" className="hidden h-8 items-center gap-2 rounded-lg border border-border px-3 text-[10px] text-muted-foreground hover:text-foreground sm:flex">
               <Search className="h-3.5 w-3.5" />
               Search
-            </button>
+            </Link>
             <span className="rounded-full border border-primary/20 bg-primary/10 px-2.5 py-1.5 text-[9px] font-semibold text-primary">PAPER</span>
             <Link to="/auth" className="rounded-lg bg-white px-3 py-2 text-[10px] font-semibold text-black">Sign in</Link>
           </div>
@@ -74,8 +74,8 @@ function Preview() {
                   </div>
                 </div>
                 <div className="hidden gap-2 sm:flex">
-                  <Quick icon={BrainCircuit} label="Research" />
-                  <Quick icon={FlaskConical} label="Backtest" />
+                  <Quick to="/research" icon={BrainCircuit} label="Research" />
+                  <Quick to="/labs" icon={FlaskConical} label="Backtest" />
                 </div>
               </div>
 
@@ -114,11 +114,11 @@ function Preview() {
             <section className="border-b border-border py-5">
               <div className="mb-2 flex items-center justify-between">
                 <h2 className="text-sm font-semibold">Watchlist</h2>
-                <button className="text-[10px] text-muted-foreground">Edit</button>
+                <Link to="/trade" className="text-[10px] text-muted-foreground hover:text-foreground">Edit</Link>
               </div>
               <div className="divide-y divide-border">
                 {watch.map((item) => (
-                  <div key={item.symbol} className="grid grid-cols-[minmax(0,1fr)_6.5rem_auto] items-center gap-3 py-3">
+                  <Link key={item.symbol} to="/trade" search={{ symbol: item.symbol }} className="grid grid-cols-[minmax(0,1fr)_6.5rem_auto] items-center gap-3 py-3">
                     <div className="min-w-0">
                       <div className="text-sm font-semibold">{item.symbol}</div>
                       <div className="mt-0.5 truncate text-[10px] text-muted-foreground">{item.name}</div>
@@ -133,7 +133,7 @@ function Preview() {
                         {item.change}
                       </div>
                     </div>
-                  </div>
+                  </Link>
                 ))}
               </div>
             </section>
@@ -167,8 +167,8 @@ function Preview() {
                   <span className="text-[9px] font-semibold text-primary">SIM</span>
                 </div>
                 <div className="grid grid-cols-2 rounded-xl bg-card p-1">
-                  <button className="rounded-lg bg-primary py-2 text-xs font-semibold text-primary-foreground">Buy</button>
-                  <button className="rounded-lg py-2 text-xs text-muted-foreground">Sell</button>
+                  <Link to="/trade" className="rounded-lg bg-primary py-2 text-center text-xs font-semibold text-primary-foreground">Buy</Link>
+                  <Link to="/trade" className="rounded-lg py-2 text-center text-xs text-muted-foreground hover:text-foreground">Sell</Link>
                 </div>
                 <div className="my-5 text-center">
                   <div className="text-[10px] text-muted-foreground">Amount</div>
@@ -179,7 +179,7 @@ function Preview() {
                   <TicketRow label="Estimated BTC" value="0.007307" />
                   <TicketRow label="Fee" value="$0.50" />
                 </div>
-                <button className="mt-4 w-full rounded-xl bg-primary py-3 text-xs font-semibold text-primary-foreground">Review paper buy</button>
+                <Link to="/trade" className="mt-4 block w-full rounded-xl bg-primary py-3 text-center text-xs font-semibold text-primary-foreground">Review paper buy</Link>
               </section>
             </div>
           </aside>
@@ -187,11 +187,11 @@ function Preview() {
       </main>
 
       <nav className="fixed inset-x-0 bottom-0 z-50 grid grid-cols-5 border-t border-border bg-background/96 px-2 pb-[max(.35rem,env(safe-area-inset-bottom))] backdrop-blur-xl lg:hidden">
-        <Bottom icon={Wallet} label="Home" active />
-        <Bottom icon={Compass} label="Markets" />
-        <Bottom icon={TrendingUp} label="Trade" />
-        <Bottom icon={BrainCircuit} label="Research" />
-        <Bottom icon={BarChart3} label="More" />
+        <Bottom to="/" icon={Wallet} label="Home" active />
+        <Bottom to="/markets" icon={Compass} label="Markets" />
+        <Bottom to="/trade" icon={TrendingUp} label="Trade" />
+        <Bottom to="/research" icon={BrainCircuit} label="Research" />
+        <Bottom to="/labs" icon={BarChart3} label="Labs" />
       </nav>
     </div>
   );
@@ -202,15 +202,15 @@ function PredictionSection() {
     <section>
       <div className="mb-2 flex items-center justify-between">
         <div className="flex items-center gap-2"><CircleDollarSign className="h-4 w-4 text-primary" /><h2 className="text-sm font-semibold">Prediction markets</h2></div>
-        <button className="text-[10px] text-muted-foreground">View all</button>
+        <Link to="/markets" className="text-[10px] text-muted-foreground hover:text-foreground">View all</Link>
       </div>
       <div className="divide-y divide-border">
         {predictions.map((item) => (
           <div key={item.question} className="py-3.5">
             <div className="text-xs font-medium leading-5">{item.question}</div>
             <div className="mt-3 flex items-center gap-2">
-              <button className="rounded-lg bg-primary/12 px-3 py-2 text-[10px] font-semibold text-primary">Yes {item.yes}¢</button>
-              <button className="rounded-lg bg-white/[0.045] px-3 py-2 text-[10px] font-semibold text-muted-foreground">No {100 - item.yes}¢</button>
+              <Link to="/markets" className="rounded-lg bg-primary/12 px-3 py-2 text-[10px] font-semibold text-primary">Yes {item.yes}¢</Link>
+              <Link to="/markets" className="rounded-lg bg-white/[0.045] px-3 py-2 text-[10px] font-semibold text-muted-foreground">No {100 - item.yes}¢</Link>
               <div className="ml-auto text-right">
                 <div className="text-[9px] text-muted-foreground">{item.volume} vol</div>
                 <div className="mt-0.5 text-[9px] text-muted-foreground">{item.closes} left</div>
@@ -230,14 +230,14 @@ function Metric({ label, value, positive = false }: { label: string; value: stri
   return <div className="border-r border-border py-4 pr-3 last:border-r-0 last:pl-3 sm:px-4 first:pl-0"><div className="text-[9px] uppercase tracking-[0.12em] text-muted-foreground">{label}</div><div className={"num mt-1 text-xs font-semibold sm:text-sm " + (positive ? "text-primary" : "")}>{value}</div></div>;
 }
 
-function Quick({ icon: Icon, label }: { icon: typeof BrainCircuit; label: string }) {
-  return <button className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-[10px] font-medium"><Icon className="h-3.5 w-3.5 text-primary" />{label}</button>;
+function Quick({ to, icon: Icon, label }: { to: "/research" | "/labs"; icon: typeof BrainCircuit; label: string }) {
+  return <Link to={to} className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-[10px] font-medium hover:border-primary/30"><Icon className="h-3.5 w-3.5 text-primary" />{label}</Link>;
 }
 
 function TicketRow({ label, value }: { label: string; value: string }) {
   return <div className="flex items-center justify-between"><span className="text-muted-foreground">{label}</span><span className="num">{value}</span></div>;
 }
 
-function Bottom({ icon: Icon, label, active = false }: { icon: typeof Wallet; label: string; active?: boolean }) {
-  return <button className={"flex min-h-14 flex-col items-center justify-center gap-1 text-[9px] font-medium " + (active ? "text-foreground" : "text-muted-foreground")}><Icon className={"h-[18px] w-[18px] " + (active ? "text-primary" : "")} />{label}</button>;
+function Bottom({ to, icon: Icon, label, active = false }: { to: "/" | "/markets" | "/trade" | "/research" | "/labs"; icon: typeof Wallet; label: string; active?: boolean }) {
+  return <Link to={to} className={"flex min-h-14 flex-col items-center justify-center gap-1 text-[9px] font-medium " + (active ? "text-foreground" : "text-muted-foreground")}><Icon className={"h-[18px] w-[18px] " + (active ? "text-primary" : "")} />{label}</Link>;
 }
