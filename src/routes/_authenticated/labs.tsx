@@ -92,12 +92,12 @@ function Labs() {
   const m = result?.metrics;
 
   return (
-    <AppShell title="Labs" subtitle="Deterministic Alpaca backtests + Gemini review + optional Vibe-Trading deep runs">
+    <AppShell title="Labs" subtitle="Alpaca backtests · Gemini-first AI review · OpenRouter fallback · Vibe deep runs">
       <div className="mx-auto max-w-[1120px]">
         <div className="grid gap-5 lg:grid-cols-[22rem_minmax(0,1fr)]">
           <section className="rounded-2xl border border-border bg-card/45 p-4">
             <div className="flex items-center gap-2"><FlaskConical className="h-4 w-4 text-primary" /><h2 className="text-sm font-semibold">Backtest setup</h2></div>
-            <p className="mt-2 text-[10px] leading-5 text-muted-foreground">Quick tests are calculated in code from Alpaca daily bars. Gemini may review the computed metrics but does not invent them.</p>
+            <p className="mt-2 text-[10px] leading-5 text-muted-foreground">Quick tests are calculated in code from Alpaca daily bars. Gemini reviews them first; OpenRouter is the automatic fallback. The AI does not calculate or invent the metrics.</p>
 
             <div className="mt-5 space-y-4">
               <Field label="Symbol" value={symbol} onChange={(v) => setSymbol(v.toUpperCase())} />
@@ -164,7 +164,7 @@ function Labs() {
 
                 {result.analysis && (
                   <div className="rounded-2xl border border-border bg-card/35 p-4">
-                    <div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">Gemini review</h3></div>
+                    <div className="flex items-center justify-between gap-3"><div className="flex items-center gap-2"><Sparkles className="h-4 w-4 text-primary" /><h3 className="text-sm font-semibold">AI review</h3></div><span className="text-[9px] uppercase tracking-[0.1em] text-muted-foreground">{result.aiProvider === "openrouter" ? "OpenRouter" : "Gemini"}{result.fallbackUsed ? " fallback" : ""}</span></div>
                     <div className="mt-3 whitespace-pre-wrap text-xs leading-6 text-muted-foreground">{result.analysis}</div>
                   </div>
                 )}

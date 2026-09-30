@@ -1,7 +1,7 @@
 import { createServerFn } from "@tanstack/react-start";
 import { requireSupabaseAuth } from "@/integrations/supabase/auth-middleware";
 import { cryptoBars, getAlpacaCreds, stockBars } from "@/lib/alpaca.server";
-import { geminiGenerate, isGeminiConfigured } from "@/lib/gemini.server";
+import { generateWithFallback, isFastAIConfigured } from "@/lib/ai.server";
 
 type Strategy = "sma_cross" | "momentum" | "mean_reversion";
 
@@ -137,8 +137,12 @@ export const runLabBacktest = createServerFn({ method: "POST" })
     };
 
     let analysis: string | null = null;
-    if (isGeminiConfigured()) {
-      analysis = await geminiGenerate(
+    let aiProvider: "gemini" | "openrouter" | null = null;
+    let aiModel: string | null = null;
+    let fallbackUsed = false;
+
+    if (isFastAIConfigured()) {
+      const ai = await generateWithFallback(
         `Interpret this deterministic paper backtest without inventing any numbers.
 Symbol: ${data.symbol} (${data.market})
 Strategy: ${data.strategy}
@@ -152,6 +156,13 @@ Explain what is encouraging, what is weak, likely overfitting risks, and what te
           maxOutputTokens: 800,
         },
       ).catch(() => null);
+
+      if (ai) {
+        analysis = ai.text;
+        aiProvider = ai.provider;
+        aiModel = ai.model;
+        fallbackUsed = ai.fallbackUsed;
+      }
     }
 
     // Persistence is best-effort so Labs still works before the optional migration is applied.
@@ -164,7 +175,7 @@ Explain what is encouraging, what is weak, likely overfitting risks, and what te
         parameters: data,
         metrics,
         analysis,
-        source: analysis ? "alpaca+gemini" : "alpaca",
+        source: analysis ? `alpaca+${aiProvider ?? "ai"}` : "alpaca",
       });
     } catch {
       // Ignore missing table/migration.
@@ -178,6 +189,11 @@ Explain what is encouraging, what is weak, likely overfitting risks, and what te
       metrics,
       analysis,
       curve: curve.filter((_, i) => i % Math.max(1, Math.floor(curve.length / 180)) === 0 || i === curve.length - 1),
-      source: analysis ? "Alpaca bars + Gemini review" : "Alpaca bars",
+      source: analysis
+        ? `Alpaca bars + ${aiProvider === "openrouter" ? "OpenRouter" : "Gemini"} review`
+        : "Alpaca bars",
+      aiProvider,
+      aiModel,
+      fallbackUsed,
     };
   });
