@@ -41,7 +41,7 @@ const STARTERS = [
   "Build a research plan for a diversified 5-asset portfolio and define failure conditions.",
 ];
 
-type Provider = "gemini" | "vibe";
+type Provider = "fast" | "vibe";
 
 function statusLabel(status: string) {
   if (["idle", "completed", "done"].includes(status)) return "Complete";
@@ -62,8 +62,8 @@ function Research() {
 
   const [input, setInput] = useState(searchParams.prompt ?? "");
   const [selected, setSelected] = useState<string | null>(null);
-  const [provider, setProvider] = useState<Provider>("gemini");
-  const [quick, setQuick] = useState<Array<{ role: "user" | "assistant"; content: string }>>([]);
+  const [provider, setProvider] = useState<Provider>("fast");
+  const [quick, setQuick] = useState<Array<{ role: "user" | "assistant"; content: string; meta?: string }>>([]);
 
   useEffect(() => {
     if (searchParams.prompt) setInput(searchParams.prompt);
@@ -76,7 +76,7 @@ function Research() {
   });
 
   useEffect(() => {
-    if (capabilities.data && !capabilities.data.gemini && capabilities.data.vibe) setProvider("vibe");
+    if (capabilities.data && !capabilities.data.fast && capabilities.data.vibe) setProvider("vibe");
   }, [capabilities.data]);
 
   const runs = useQuery({
@@ -114,9 +114,16 @@ function Research() {
       return askGemini({ data: { prompt } });
     },
     onSuccess: (result) => {
-      setQuick((prev) => [...prev, { role: "assistant", content: result.reply }]);
+      const providerLabel =
+        result.provider === "openrouter"
+          ? `OpenRouter · ${result.model}${result.fallbackUsed ? " · Gemini fallback" : ""}`
+          : `Gemini · ${result.model}`;
+      setQuick((prev) => [...prev, { role: "assistant", content: result.reply, meta: providerLabel }]);
       setInput("");
       setSelected(null);
+      if (result.provider === "openrouter" && result.fallbackUsed) {
+        toast.info("Gemini was unavailable, so Terminal used OpenRouter automatically.");
+      }
     },
     onError: (err) => {
       setQuick((prev) => prev.slice(0, -1));
@@ -138,7 +145,7 @@ function Research() {
     run.data &&
     !["idle", "completed", "done", "failed", "error", "cancelled"].includes(run.data.status);
 
-  const geminiReady = Boolean(capabilities.data?.gemini);
+  const fastReady = Boolean(capabilities.data?.fast);
   const vibeReady = Boolean(capabilities.data?.vibe);
 
   function submit(prompt = input) {
@@ -148,13 +155,13 @@ function Research() {
       if (!vibeReady) return toast.error("The Vibe-Trading engine is not online yet.");
       vibeLaunch.mutate(clean);
     } else {
-      if (!geminiReady) return toast.error("Gemini is not configured.");
+      if (!fastReady) return toast.error("Terminal AI is not configured.");
       geminiLaunch.mutate(clean);
     }
   }
 
   return (
-    <AppShell title="Research" subtitle="Gemini for fast analysis · Vibe-Trading for tool-using quant research" noPad>
+    <AppShell title="Research" subtitle="Gemini first · OpenRouter fallback · Vibe-Trading deep research" noPad>
       <div className="grid min-h-[calc(100vh-7rem)] grid-cols-1 lg:grid-cols-[17rem_minmax(0,1fr)]">
         <aside className="border-b border-border bg-card/20 p-3 lg:border-b-0 lg:border-r">
           <button
@@ -171,12 +178,12 @@ function Research() {
           <div className="mb-2 px-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Engine</div>
           <div className="mb-4 grid gap-1">
             <ProviderButton
-              active={provider === "gemini"}
-              ready={geminiReady}
-              onClick={() => setProvider("gemini")}
+              active={provider === "fast"}
+              ready={fastReady}
+              onClick={() => setProvider("fast")}
               icon={WandSparkles}
-              title="Gemini"
-              detail="Fast analysis"
+              title="Terminal AI"
+              detail={capabilities.data?.chain ?? "Gemini → OpenRouter"}
             />
             <ProviderButton
               active={provider === "vibe"}
@@ -208,7 +215,7 @@ function Research() {
             ))}
             {runs.isError && (
               <div className="rounded-xl border border-border p-3 text-[9px] leading-4 text-muted-foreground">
-                Deep-run history needs the Terminal research migration. Gemini fast research still works.
+                Deep-run history needs the Terminal research migration. Fast AI still works independently.
               </div>
             )}
           </div>
@@ -221,7 +228,7 @@ function Research() {
                 <div className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary"><BrainCircuit className="h-5 w-5" /></div>
                 <h2 className="text-3xl font-semibold tracking-[-0.045em] sm:text-4xl">Ask a market question. Keep the evidence separate from the story.</h2>
                 <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
-                  Gemini can analyze your Terminal portfolio immediately. Vibe-Trading runs deeper research and backtesting workflows when its engine service is online.
+                  Terminal tries Gemini first and automatically falls back to OpenRouter if Gemini fails. Vibe-Trading handles deeper tool-using research when its engine service is online.
                 </p>
               </div>
 
@@ -261,10 +268,10 @@ function Research() {
               ) : (
                 <div className="flex-1 space-y-5 pb-6">
                   <div className="border-b border-border pb-4">
-                    <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-primary">Gemini fast research</div>
-                    <div className="mt-1 text-xs text-muted-foreground">Grounded in the portfolio context available to Terminal; no fabricated live market facts.</div>
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.14em] text-primary">Fast research · {capabilities.data?.chain ?? "Gemini → OpenRouter"}</div>
+                    <div className="mt-1 text-xs text-muted-foreground">Grounded in the portfolio context available to Terminal; provider fallback happens server-side.</div>
                   </div>
-                  {quick.map((m, i) => <ResearchMessage key={i} role={m.role} content={m.content} />)}
+                  {quick.map((m, i) => <ResearchMessage key={i} role={m.role} content={m.content} meta={m.meta} />)}
                   {geminiLaunch.isPending && <div className="flex items-center gap-2 text-xs text-muted-foreground"><span className="h-2 w-2 animate-pulse rounded-full bg-primary" />Analyzing…</div>}
                 </div>
               )}
@@ -277,11 +284,12 @@ function Research() {
   );
 }
 
-function ResearchMessage({ role, content, tools }: { role: string; content: string; tools?: Array<Record<string, unknown>> }) {
+function ResearchMessage({ role, content, tools, meta }: { role: string; content: string; tools?: Array<Record<string, unknown>>; meta?: string }) {
   const user = role === "user";
   return (
     <div className={cn("flex", user ? "justify-end" : "justify-start")}>
       <div className={cn("max-w-[94%] whitespace-pre-wrap rounded-2xl px-4 py-3 text-sm leading-6", user ? "bg-primary text-primary-foreground" : "border border-border bg-card/55 text-foreground")}>
+        {!user && meta ? <div className="mb-2 text-[9px] font-semibold uppercase tracking-[0.1em] text-primary">{meta}</div> : null}
         {content}
         {!user && tools?.length ? (
           <div className="mt-3 border-t border-border/70 pt-2">
@@ -336,7 +344,7 @@ function PromptBox({
   return (
     <form onSubmit={(e) => { e.preventDefault(); onSubmit(); }} className="sticky bottom-20 mt-5 flex items-end gap-2 rounded-2xl border border-border bg-background/95 p-2 shadow-[0_20px_70px_-35px_rgba(0,0,0,.95)] backdrop-blur-xl lg:bottom-4">
       <Search className="mb-2 ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
-      <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={2} placeholder={provider === "vibe" ? "Give Vibe-Trading a research mission…" : "Ask Gemini about a market, portfolio or thesis…"} className="min-h-12 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground" />
+      <textarea value={value} onChange={(e) => onChange(e.target.value)} rows={2} placeholder={provider === "vibe" ? "Give Vibe-Trading a research mission…" : "Ask Terminal AI about a market, portfolio or thesis…"} className="min-h-12 flex-1 resize-none bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground" />
       <button type="submit" disabled={pending || !value.trim()} className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-35"><ArrowUp className="h-4 w-4" /></button>
     </form>
   );
