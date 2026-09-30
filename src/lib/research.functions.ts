@@ -6,7 +6,7 @@ import {
   type EngineMessage,
   type EngineSession,
 } from "@/lib/quant-engine.server";
-import { geminiGenerate, isGeminiConfigured } from "@/lib/gemini.server";
+import { generateWithFallback, getAIProviderStatus, isFastAIConfigured } from "@/lib/ai.server";
 
 const cleanPrompt = (value: unknown) => {
   const prompt = String(value ?? "").trim();
@@ -110,16 +110,32 @@ export const cancelResearch = createServerFn({ method: "POST" })
 
 export const getResearchCapabilities = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
-  .handler(async () => ({
-    vibe: isQuantEngineConfigured(),
-    gemini: isGeminiConfigured(),
-  }));
+  .handler(async () => {
+    const ai = getAIProviderStatus();
+    return {
+      vibe: isQuantEngineConfigured(),
+      fast: Boolean(ai.primary),
+      gemini: ai.gemini,
+      openrouter: ai.openrouter,
+      openrouterModel: ai.openrouterModel,
+      primary: ai.primary,
+      chain: ai.gemini && ai.openrouter
+        ? "Gemini → OpenRouter"
+        : ai.gemini
+          ? "Gemini"
+          : ai.openrouter
+            ? "OpenRouter"
+            : "Not configured",
+    };
+  });
 
 export const askGeminiResearch = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((input: { prompt: string }) => ({ prompt: cleanPrompt(input?.prompt) }))
   .handler(async ({ data, context }) => {
-    if (!isGeminiConfigured()) throw new Error("Gemini is not configured.");
+    if (!isFastAIConfigured()) {
+      throw new Error("Terminal AI is not configured. Add Gemini or OpenRouter in Vercel.");
+    }
 
     const db = context.supabase as any;
     const [holdings, accounts, signals, news] = await Promise.all([
@@ -136,7 +152,7 @@ export const askGeminiResearch = createServerFn({ method: "POST" })
       news: news.data ?? [],
     };
 
-    const reply = await geminiGenerate(
+    const result = await generateWithFallback(
       `User question: ${data.prompt}
 
 Terminal account context:
@@ -154,8 +170,10 @@ Keep the answer concise but analytical.`,
     );
 
     return {
-      provider: "gemini" as const,
-      reply,
+      provider: result.provider,
+      model: result.model,
+      fallbackUsed: result.fallbackUsed,
+      reply: result.text,
       createdAt: new Date().toISOString(),
     };
   });
